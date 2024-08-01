@@ -675,4 +675,5 @@ struct target_type esp32_target = {
 	.deinit_target = esp_xtensa_target_deinit,
 
 	.commands = esp32_all_command_handlers,
+	.profiling = xtensa_profiling,
 };

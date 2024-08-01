@@ -196,4 +196,6 @@ struct target_type xtensa_chip_target = {
 
 	.get_gdb_fileio_info = xtensa_get_gdb_fileio_info,
 	.gdb_fileio_end = xtensa_gdb_fileio_end,
+
+	.profiling = xtensa_profiling,
 };

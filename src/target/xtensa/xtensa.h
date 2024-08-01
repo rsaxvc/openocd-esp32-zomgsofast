@@ -404,6 +404,8 @@ int xtensa_deassert_reset(struct target *target);
 int xtensa_soft_reset_halt(struct target *target);
 int xtensa_breakpoint_add(struct target *target, struct breakpoint *breakpoint);
 int xtensa_breakpoint_remove(struct target *target, struct breakpoint *breakpoint);
+int xtensa_profiling(struct target *target, uint32_t *samples,
+	uint32_t max_num_samples, uint32_t *num_samples, uint32_t seconds);
 int xtensa_watchpoint_add(struct target *target, struct watchpoint *watchpoint);
 int xtensa_watchpoint_remove(struct target *target, struct watchpoint *watchpoint);
 int xtensa_watchpoint_hit(struct target *target, struct watchpoint **hit_watchpoint);
