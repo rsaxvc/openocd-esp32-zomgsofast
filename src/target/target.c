@@ -4265,7 +4265,7 @@ static void write_gmon(uint32_t *samples, uint32_t sample_num, const char *filen
 
 	/* FIXME: What is the reasonable number of buckets?
 	 * The profiling result will be more accurate if there are enough buckets. */
-	static const uint32_t max_buckets = 128 * 1024; /* maximum buckets. */
+	static const uint32_t max_buckets = 512 * 1024 * 1024; /* maximum buckets. */
 	uint32_t num_buckets = address_space / sizeof(UNIT);
 	if (num_buckets > max_buckets)
 		num_buckets = max_buckets;
