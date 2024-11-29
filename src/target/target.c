@@ -4211,6 +4211,7 @@ static void write_gmon(const uint32_t *samples, uint32_t sample_num, const char 
 			struct target *target, uint32_t duration_ms)
 {
 	uint32_t i;
+
 	FILE *f = fopen(filename, "wb");
 	if (!f)
 		return;
@@ -4236,24 +4237,6 @@ static void write_gmon(const uint32_t *samples, uint32_t sample_num, const char 
 	uint32_t num_buckets = address_space / sizeof(UNIT);
 	if (num_buckets > max_buckets)
 		num_buckets = max_buckets;
-	int *buckets = malloc(sizeof(int) * num_buckets);
-	if (!buckets) {
-		fclose(f);
-		return;
-	}
-	memset(buckets, 0, sizeof(int) * num_buckets);
-	for (i = 0; i < sample_num; i++) {
-		uint32_t address = samples[i];
-
-		if ((address < min) || (max <= address))
-			continue;
-
-		long long a = address - min;
-		long long b = num_buckets;
-		long long c = address_space;
-		int index_t = (a * b) / c; /* danger!!!! int32 overflows */
-		buckets[index_t]++;
-	}
 
 	/* append binary memory gmon.out &profile_hist_hdr ((char*)&profile_hist_hdr + sizeof(struct gmon_hist_hdr)) */
 	write_long(f, min, target);			/* low_pc */
@@ -4267,22 +4250,20 @@ static void write_gmon(const uint32_t *samples, uint32_t sample_num, const char 
 	write_string(f, "s");
 
 	/*append binary memory gmon.out profile_hist_data (profile_hist_data + profile_hist_hdr.hist_size) */
+	uint32_t bidx;
+	for (i = 0, bidx = 0; bidx < num_buckets; ++bidx) {
+		uint32_t val = 0;
+		long long bmax = min + (long long)address_space * (bidx + 1) / num_buckets;
+		for ( ; i < sample_num && samples[i] < bmax; ++i)
+			val++;
+		if (val > UINT16_MAX)
+			val = UINT16_MAX;
 
-	char *data = malloc(2 * num_buckets);
-	if (data) {
-		for (i = 0; i < num_buckets; i++) {
-			int val;
-			val = buckets[i];
-			if (val > 65535)
-				val = 65535;
-			data[i * 2] = val&0xff;
-			data[i * 2 + 1] = (val >> 8) & 0xff;
-		}
-		free(buckets);
-		write_data(f, data, num_buckets * 2);
-		free(data);
-	} else
-		free(buckets);
+		uint8_t data[2];
+		data[0] = val & 0xff;
+		data[1] = (val >> 8) & 0xff;
+		write_data(f, data, 2);
+	}
 
 	fclose(f);
 }
