@@ -4206,41 +4206,31 @@ static void write_string(FILE *f, char *s)
 
 typedef unsigned char UNIT[2];  /* unit of profiling */
 
-/* Dump a gmon.out histogram file. */
-static void write_gmon(const uint32_t *samples, uint32_t sample_num, const char *filename,
-			struct target *target, uint32_t duration_ms)
+static void write_gmon_hist(FILE *f, const uint32_t *samples, uint32_t sample_num,
+			float sample_rate, struct target *target)
 {
-	FILE *f = fopen(filename, "wb");
-	if (!f)
-		return;
-	write_string(f, "gmon");
-	write_long(f, 0x00000001, target); /* Version */
-	write_long(f, 0, target); /* padding */
-	write_long(f, 0, target); /* padding */
-	write_long(f, 0, target); /* padding */
+	uint32_t min = samples[0];
+	uint32_t max = samples[sample_num - 1];
+
+	/* max should be (largest sample + 1)
+	 * Refer to binutils/gprof/hist.c (find_histogram_for_pc) */
+	max++;
+
+	/* The ratio ((double)((max - min) / 2) / num_buckets) must match across
+	 * all histograms in this file. To avoid trunction in the /2, we must have
+	 * an even length address space for compatibility with binutils <=2.44.
+	 * Refer to binutils/gprof/hist.c (calculation of n_hist_scale)*/
+	if ((max - min) % 2)
+		max++;
+	uint32_t address_space = max - min;
 
 	uint8_t zero = 0;  /* GMON_TAG_TIME_HIST */
 	write_data(f, &zero, 1);
 
-	/* figure out bucket size */
-	uint32_t min = samples[0];
-	/* max should be (largest sample + 1)
-	 * Refer to binutils/gprof/hist.c (find_histogram_for_pc) */
-	uint32_t max = samples[sample_num - 1] + 1;
-	uint32_t address_space = max - min;
-
-	/* FIXME: What is the reasonable number of buckets?
-	 * The profiling result will be more accurate if there are enough buckets. */
-	static const uint32_t max_buckets = 128 * 1024; /* maximum buckets. */
-	uint32_t num_buckets = address_space / sizeof(UNIT);
-	if (num_buckets > max_buckets)
-		num_buckets = max_buckets;
-
 	/* append binary memory gmon.out &profile_hist_hdr ((char*)&profile_hist_hdr + sizeof(struct gmon_hist_hdr)) */
 	write_long(f, min, target);			/* low_pc */
 	write_long(f, max, target);			/* high_pc */
-	write_long(f, num_buckets, target);	/* # of buckets */
-	float sample_rate = sample_num / (duration_ms / 1000.0);
+	write_long(f, address_space / sizeof(UNIT), target);	/* # of buckets */
 	write_long(f, sample_rate, target);
 	write_string(f, "seconds");
 	for (uint32_t i = 0; i < (15 - strlen("seconds")); i++)
@@ -4248,11 +4238,12 @@ static void write_gmon(const uint32_t *samples, uint32_t sample_num, const char 
 	write_string(f, "s");
 
 	/*append binary memory gmon.out profile_hist_data (profile_hist_data + profile_hist_hdr.hist_size) */
-	for (uint32_t i = 0, bidx = 0; bidx < num_buckets; ++bidx) {
+	for (uint32_t i = 0, bidx = 0; bidx < address_space; bidx += sizeof(UNIT)) {
 		uint32_t val = 0;
-		long long bmax = min + (long long)address_space * (bidx + 1) / num_buckets;
-		for (; i < sample_num && samples[i] < bmax; ++i)
+		long long bmax = min + bidx;
+		for ( ; i < sample_num && samples[i] <= bmax; ++i)
 			val++;
+
 		if (val > UINT16_MAX) {
 			LOG_WARNING("profiler bucket saturated, will read as 65535");
 			val = UINT16_MAX;
@@ -4262,6 +4253,37 @@ static void write_gmon(const uint32_t *samples, uint32_t sample_num, const char 
 		data[0] = val & 0xff;
 		data[1] = (val >> 8) & 0xff;
 		write_data(f, data, 2);
+	}
+}
+
+/* Dump a gmon.out histogram file. */
+static void write_gmon(const uint32_t *samples, uint32_t sample_num, const char *filename,
+			struct target *target, uint32_t duration_ms)
+{
+	float sample_rate = sample_num / (duration_ms / 1000.0);
+	FILE *f = fopen(filename, "wb");
+	if (!f)
+		return;
+	write_string(f, "gmon");
+	write_long(f, 0x00000001, target); /* Version */
+	write_long(f, 0, target); /* padding */
+	write_long(f, 0, target); /* padding */
+	write_long(f, 0, target); /* padding */
+
+	while (sample_num) {
+		/* if address gap exceeds this, make another histogram */
+		const uint32_t MAX_GAP = 32;
+
+		/* figure out bucket size */
+		uint32_t max = samples[0];
+		uint32_t this_pass = 1;
+		while (this_pass < sample_num && samples[this_pass] - max < MAX_GAP)
+			max = samples[this_pass++];
+
+		write_gmon_hist(f, samples, this_pass, sample_rate, target);
+
+		samples += this_pass;
+		sample_num -= this_pass;
 	}
 
 	fclose(f);
